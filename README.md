@@ -1,6 +1,8 @@
-### аскинема работы загрузчика страниц 
-
+### аскинема работы загрузчика страниц
 [![asciicast](https://asciinema.org/a/htkGEyeLGFCnATId0yCSWLNR3.svg)](https://asciinema.org/a/htkGEyeLGFCnATId0yCSWLNR3)
+
+### аскинема загрузки изображений при загрузке страницы
+[![asciicast](https://asciinema.org/a/G2EAVdDd6BAa9ioLS4xSHo6KX.svg)](https://asciinema.org/a/G2EAVdDd6BAa9ioLS4xSHo6KX)
 
 ### Hexlet tests and linter status:
 [![Actions Status](https://github.com/erusanov/fullstack-javascript-project-4/actions/workflows/hexlet-check.yml/badge.svg)](https://github.com/erusanov/fullstack-javascript-project-4/actions)
