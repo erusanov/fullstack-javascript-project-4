@@ -3,6 +3,7 @@ import fs from 'fs/promises'
 import axios from 'axios'
 import { load } from 'cheerio'
 import debug from 'debug'
+import Listr from 'listr'
 
 const log = debug('page-loader')
 
@@ -132,23 +133,24 @@ const pageLoader = (url, outputDir = process.cwd()) => {
               $(res.el).attr(res.attr, res.newSrc)
             })
 
-          const promises = resources.map(res =>
-            axios
+          const tasks = resources.map(res => ({
+            title: res.url,
+            task: () => axios
               .get(res.url, { responseType: 'arraybuffer' })
-              .then((resData) => {
-                log(`Saving resource ${res.url} to ${res.filepath}`)
-
-                return fs.writeFile(res.filepath, resData.data)
-              })
+              .then(resData => fs.writeFile(res.filepath, resData.data))
               .catch((e) => {
                 throw new Error(`Failed to download resource ${res.url}: ${e.message}`)
               }),
-          )
+          }))
 
-          return Promise.all(promises)
+          return new Listr(
+            tasks,
+            {
+              concurrent: true,
+            })
+            .run()
         })
-    })
-    .then(() => {
+    }).then(() => {
       log('All resources loaded')
 
       log(`Saving html to ${htmlFilepath}`)
