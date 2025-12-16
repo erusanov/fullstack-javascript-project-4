@@ -4,75 +4,177 @@ import os from 'os'
 import fs from 'fs/promises'
 import nock from 'nock'
 import { expect, test, beforeEach } from '@jest/globals'
+import { load } from 'cheerio'
 import pageLoader from '../src/index.js'
+
+nock.disableNetConnect()
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 const getFixturePath = filename => path.join(__dirname, '..', '__fixtures__', filename)
+const normalizeHtml = html => load(html).html()
+
+const BASE_URL = 'https://ru.hexlet.io'
+
+const API = {
+  COURSES: '/courses',
+  IMAGE: '/assets/professions/nodejs.png',
+  CSS: '/assets/application.css',
+  JS: '/packs/js/runtime.js',
+}
+
+const PATHS = {
+  IMAGE: 'assets/professions/nodejs.png',
+  CSS: 'assets/application.css',
+  JS: 'packs/js/runtime.js',
+}
+
+const RESPONSE = {
+  OK: 200,
+  NOT_FOUND: 404,
+}
+
+const FILES = {
+  HTML: 'ru-hexlet-io-courses.html',
+  RESOURCES_DIR: 'ru-hexlet-io-courses_files',
+  IMAGE: 'ru-hexlet-io-assets-professions-nodejs.png',
+  CSS: 'ru-hexlet-io-assets-application.css',
+  JS: 'ru-hexlet-io-packs-js-runtime.js',
+  CANONICAL_HTML: 'ru-hexlet-io-courses.html',
+  EXPECTED: 'expected.html',
+}
 
 let tempDir
+let getTempPath
+
+const URL = `${BASE_URL}${API.COURSES}`
 
 beforeEach(async () => {
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'page-loader-'))
+  getTempPath = (...paths) => path.join(tempDir, ...paths)
 })
 
-test('page-loader', async () => {
-  const url = 'https://ru.hexlet.io/courses'
-  const responseData = await fs.readFile(getFixturePath('ru-hexlet-io-courses.html'), 'utf-8')
+test('page-loader with all resources', async () => {
+  const html = await fs.readFile(getFixturePath(FILES.HTML), 'utf-8')
+  const image = await fs.readFile(getFixturePath(PATHS.IMAGE))
+  const css = await fs.readFile(getFixturePath(PATHS.CSS), 'utf-8')
+  const js = await fs.readFile(getFixturePath(PATHS.JS), 'utf-8')
+  const expectedHtml = normalizeHtml(await fs.readFile(getFixturePath(FILES.EXPECTED), 'utf-8'))
 
-  nock('https://ru.hexlet.io')
-    .get('/courses')
-    .reply(200, responseData)
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, html)
 
-  const expectedFilename = 'ru-hexlet-io-courses.html'
-  const filepath = await pageLoader(url, tempDir)
+  nock(BASE_URL)
+    .get(API.IMAGE)
+    .reply(RESPONSE.OK, image)
 
-  expect(filepath).toBe(path.join(tempDir, expectedFilename))
+  nock(BASE_URL)
+    .get(API.CSS)
+    .reply(RESPONSE.OK, css)
 
-  const downloadedData = await fs.readFile(filepath, 'utf-8')
+  nock(BASE_URL)
+    .get(API.JS)
+    .reply(RESPONSE.OK, js)
 
-  expect(downloadedData).toEqual(responseData)
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, html)
+
+  const htmlFilepath = await pageLoader(URL, tempDir)
+
+  expect(htmlFilepath)
+    .toBe(getTempPath(FILES.HTML))
+
+  await expect(fs.readFile(htmlFilepath, 'utf-8'))
+    .resolves
+    .toEqual(expectedHtml)
+
+  await expect(fs.readFile(getTempPath(FILES.RESOURCES_DIR, FILES.IMAGE)))
+    .resolves
+    .toEqual(image)
+
+  await expect(fs.readFile(getTempPath(FILES.RESOURCES_DIR, FILES.CSS), 'utf-8'))
+    .resolves
+    .toEqual(css)
+
+  await expect(fs.readFile(getTempPath(FILES.RESOURCES_DIR, FILES.JS), 'utf-8'))
+    .resolves
+    .toEqual(js)
+
+  await expect(fs.readFile(getTempPath(FILES.RESOURCES_DIR, FILES.CANONICAL_HTML), 'utf-8'))
+    .resolves
+    .toEqual(html)
 })
 
-test('page-loader with trailing slash', async () => {
-  const url = 'https://ru.hexlet.io/'
-  const responseData = await fs.readFile(getFixturePath('ru-hexlet-io-courses.html'), 'utf-8')
+test('page-loader http error on page', async () => {
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.NOT_FOUND)
 
-  nock('https://ru.hexlet.io')
-    .get('/')
-    .reply(200, responseData)
-
-  const expectedFilename = 'ru-hexlet-io.html'
-  const filepath = await pageLoader(url, tempDir)
-
-  expect(filepath).toBe(path.join(tempDir, expectedFilename))
-
-  const downloadedData = await fs.readFile(filepath, 'utf-8')
-
-  expect(downloadedData).toEqual(responseData)
+  await expect(pageLoader(URL, tempDir))
+    .rejects
+    .toThrow(`Failed to download page ${URL}: Request failed with status code ${RESPONSE.NOT_FOUND}`)
 })
 
-test('page-loader http error', async () => {
-  const url = 'https://ru.hexlet.io/courses'
+test('page-loader http error on resource', async () => {
+  const html = await fs.readFile(getFixturePath(FILES.HTML), 'utf-8')
 
-  nock('https://ru.hexlet.io')
-    .get('/courses')
-    .reply(404)
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, html)
 
-  await expect(pageLoader(url, tempDir)).rejects.toThrow('Request failed with status code 404')
+  nock(BASE_URL)
+    .get(API.IMAGE)
+    .reply(RESPONSE.NOT_FOUND)
+
+  nock(BASE_URL)
+    .get(API.CSS)
+    .reply(RESPONSE.OK, 'css data')
+
+  nock(BASE_URL)
+    .get(API.JS)
+    .reply(RESPONSE.OK, 'js data')
+
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, 'html data')
+
+  await expect(pageLoader(URL, tempDir))
+    .rejects
+    .toThrow(`Failed to download resource ${BASE_URL}${API.IMAGE}: Request failed with status code ${RESPONSE.NOT_FOUND}`)
 })
 
-test('page-loader filesystem error', async () => {
-  const url = 'https://ru.hexlet.io/courses'
+test('page-loader filesystem error on creating resource dir', async () => {
+  const html = await fs.readFile(getFixturePath(FILES.HTML), 'utf-8')
+  const resourceDirPath = getTempPath(FILES.RESOURCES_DIR)
 
-  const responseData = await fs.readFile(getFixturePath('ru-hexlet-io-courses.html'), 'utf-8')
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, html)
 
-  nock('https://ru.hexlet.io')
-    .get('/courses')
-    .reply(200, responseData)
+  nock(BASE_URL)
+    .get(API.IMAGE)
+    .reply(RESPONSE.OK, 'image data')
+
+  await fs.writeFile(resourceDirPath, '')
+
+  await expect(pageLoader(URL, tempDir))
+    .rejects
+    .toThrow(`Failed to create resource directory ${resourceDirPath}`)
+})
+
+test('page-loader filesystem error on saving page', async () => {
+  const html = '<html><body><h1>Hello, World!</h1></body></html>'
+
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, html)
 
   const nonExistentDir = path.join(tempDir, 'non-existent')
 
-  await expect(pageLoader(url, nonExistentDir)).rejects.toThrow('ENOENT')
+  await expect(pageLoader(URL, nonExistentDir))
+    .rejects
+    .toThrow(`Output directory ${nonExistentDir} does not exist`)
 })
