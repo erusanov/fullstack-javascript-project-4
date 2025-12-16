@@ -7,6 +7,12 @@ import Listr from 'listr'
 
 const log = debug('page-loader')
 
+const TAGS = {
+  img: 'src',
+  link: 'href',
+  script: 'src',
+}
+
 const formatName = (urlString, extension = '') => {
   let url
 
@@ -32,12 +38,6 @@ const formatName = (urlString, extension = '') => {
   return `${basename}${extension}`
 }
 
-const tags = {
-  img: 'src',
-  link: 'href',
-  script: 'src',
-}
-
 const isLocal = (src, url) => {
   try {
     const { host } = new URL(url)
@@ -48,6 +48,92 @@ const isLocal = (src, url) => {
   catch {
     return true
   }
+}
+
+const collectResources = ({ $, resourceDirPath, resourceDirName, url }) => {
+  const resources = []
+
+  Object
+    .keys(TAGS)
+    .forEach(
+      (tagName) => {
+        const attr = TAGS[tagName]
+
+        $(tagName)
+          .each((i, el) => {
+            const src = $(el).attr(attr)
+
+            if (src && isLocal(src, url)) {
+              const resourceUrl = new URL(src, url)
+
+              log(`Found local resource: ${resourceUrl.href}`)
+
+              const extension = path.extname(resourceUrl.pathname) || '.html'
+              const resourceFilename = formatName(resourceUrl.href, extension)
+
+              resources.push({
+                el,
+                attr,
+                url: resourceUrl.href,
+                filepath: path.join(resourceDirPath, resourceFilename),
+                newSrc: path.posix.join(resourceDirName, resourceFilename),
+              })
+            }
+          })
+      })
+
+  return resources
+}
+
+const createResourceTask = ({ url, filepath }) => {
+  return {
+    title: url,
+    task: () => axios
+      .get(url, { responseType: 'arraybuffer' })
+      .then(resData => fs.writeFile(filepath, resData.data))
+      .catch((e) => {
+        throw new Error(`Failed to download resource ${url}: ${e.message}`)
+      }),
+  }
+}
+
+const replaceResourcePaths = ({ $, resources }) => {
+  resources
+    .forEach((res) => {
+      $(res.el).attr(res.attr, res.newSrc)
+    })
+}
+
+const loadResources = ({ resourceDirPath, resourceDirName, url }) => (response) => {
+  log('Html loaded')
+
+  const $ = load(response.data)
+  const resources = collectResources({ $, resourceDirPath, resourceDirName, url })
+
+  if (resources.length === 0) {
+    log('No resources to load')
+
+    return Promise.resolve()
+  }
+
+  log('Start loading resources')
+
+  return fs
+    .mkdir(resourceDirPath, { recursive: true })
+    .catch((e) => {
+      throw new Error(`Failed to create resource directory ${resourceDirPath}: ${e.message}`)
+    })
+    .then(() => {
+      replaceResourcePaths({ $, resources })
+
+      return new Listr(
+        resources.map(createResourceTask),
+        { concurrent: true },
+      )
+        .run()
+    })
+    .then(() => replaceResourcePaths({ $, resources }))
+    .then(() => $.html())
 }
 
 const pageLoader = (url, outputDir = process.cwd()) => {
@@ -71,92 +157,19 @@ const pageLoader = (url, outputDir = process.cwd()) => {
   log(`Generated html filename: ${htmlFilename}`)
   log(`Generated resource directory name: ${resourceDirName}`)
 
-  let $
-
   return axios
     .get(url)
     .catch((e) => {
       throw new Error(`Failed to download page ${url}: ${e.message}`)
     })
-    .then((response) => {
-      log('Html loaded')
-
-      $ = load(response.data)
-
-      const resources = []
-
-      Object
-        .keys(tags)
-        .forEach(
-          (tagName) => {
-            const attr = tags[tagName]
-
-            $(tagName)
-              .each((i, el) => {
-                const src = $(el).attr(attr)
-
-                if (src && isLocal(src, url)) {
-                  const resourceUrl = new URL(src, url)
-
-                  log(`Found local resource: ${resourceUrl.href}`)
-
-                  const extension = path.extname(resourceUrl.pathname) || '.html'
-                  const resourceFilename = formatName(resourceUrl.href, extension)
-
-                  resources.push({
-                    el,
-                    attr,
-                    url: resourceUrl.href,
-                    filepath: path.join(resourceDirPath, resourceFilename),
-                    newSrc: path.posix.join(resourceDirName, resourceFilename),
-                  })
-                }
-              })
-          })
-
-      if (resources.length === 0) {
-        log('No resources to load')
-
-        return Promise.resolve()
-      }
-
-      log('Start loading resources')
-
-      return fs
-        .mkdir(resourceDirPath, { recursive: true })
-        .catch((e) => {
-          throw new Error(`Failed to create resource directory ${resourceDirPath}: ${e.message}`)
-        })
-        .then(() => {
-          resources
-            .forEach((res) => {
-              $(res.el).attr(res.attr, res.newSrc)
-            })
-
-          const tasks = resources.map(res => ({
-            title: res.url,
-            task: () => axios
-              .get(res.url, { responseType: 'arraybuffer' })
-              .then(resData => fs.writeFile(res.filepath, resData.data))
-              .catch((e) => {
-                throw new Error(`Failed to download resource ${res.url}: ${e.message}`)
-              }),
-          }))
-
-          return new Listr(
-            tasks,
-            {
-              concurrent: true,
-            })
-            .run()
-        })
-    }).then(() => {
+    .then(loadResources({ resourceDirPath, resourceDirName, url }))
+    .then((html) => {
       log('All resources loaded')
 
       log(`Saving html to ${htmlFilepath}`)
 
       return fs
-        .writeFile(htmlFilepath, $.html())
+        .writeFile(htmlFilepath, html)
         .catch((e) => {
           throw new Error(`Failed to save page to ${htmlFilepath}: ${e.message}`)
         })
