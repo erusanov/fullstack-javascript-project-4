@@ -13,6 +13,9 @@
 ### аскинема вывода ошибок
 [![asciicast](https://asciinema.org/a/XAiaRp2qBJ12vhUJfel5FXo40.svg)](https://asciinema.org/a/XAiaRp2qBJ12vhUJfel5FXo40)
 
+### аскинема процесса загрузки
+[![asciicast](https://asciinema.org/a/LLbbNLERw6n6TPWB2mWnkZqvq.svg)](https://asciinema.org/a/LLbbNLERw6n6TPWB2mWnkZqvq)
+
 ### Hexlet tests and linter status:
 [![Actions Status](https://github.com/erusanov/fullstack-javascript-project-4/actions/workflows/hexlet-check.yml/badge.svg)](https://github.com/erusanov/fullstack-javascript-project-4/actions)
 

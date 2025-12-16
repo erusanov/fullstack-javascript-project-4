@@ -146,20 +146,6 @@ test('page-loader http error on resource', async () => {
     .toThrow(`Failed to download resource ${BASE_URL}${API.IMAGE}: Request failed with status code ${RESPONSE.NOT_FOUND}`)
 })
 
-test('page-loader filesystem error on saving page', async () => {
-  const html = '<html><body><h1>Hello, World!</h1></body></html>'
-
-  nock(BASE_URL)
-    .get(API.COURSES)
-    .reply(RESPONSE.OK, html)
-
-  const nonExistentDir = path.join(tempDir, 'non-existent')
-
-  await expect(pageLoader(URL, nonExistentDir))
-    .rejects
-    .toThrow(`Failed to save page to ${path.join(nonExistentDir, FILES.HTML)}`)
-})
-
 test('page-loader filesystem error on creating resource dir', async () => {
   const html = await fs.readFile(getFixturePath(FILES.HTML), 'utf-8')
   const resourceDirPath = getTempPath(FILES.RESOURCES_DIR)
@@ -177,4 +163,18 @@ test('page-loader filesystem error on creating resource dir', async () => {
   await expect(pageLoader(URL, tempDir))
     .rejects
     .toThrow(`Failed to create resource directory ${resourceDirPath}`)
+})
+
+test('page-loader filesystem error on saving page', async () => {
+  const html = '<html><body><h1>Hello, World!</h1></body></html>'
+
+  nock(BASE_URL)
+    .get(API.COURSES)
+    .reply(RESPONSE.OK, html)
+
+  const nonExistentDir = path.join(tempDir, 'non-existent')
+
+  await expect(pageLoader(URL, nonExistentDir))
+    .rejects
+    .toThrow(`Output directory ${nonExistentDir} does not exist`)
 })
