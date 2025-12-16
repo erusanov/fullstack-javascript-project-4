@@ -7,7 +7,15 @@ import debug from 'debug'
 const log = debug('page-loader')
 
 const formatName = (urlString, extension = '') => {
-  const url = new URL(urlString)
+  let url
+
+  try {
+    url = new URL(urlString)
+  }
+  catch (e) {
+    throw new Error(`Failed to parse ${urlString}: ${e.message}`)
+  }
+
   const { hostname } = url
 
   const pathname = url.pathname.endsWith(extension) && extension
@@ -30,99 +38,127 @@ const tags = {
 }
 
 const isLocal = (src, url) => {
-  const { host } = new URL(url)
-  const { host: srcHost } = new URL(src, url)
+  try {
+    const { host } = new URL(url)
+    const { host: srcHost } = new URL(src, url)
 
-  return host === srcHost
+    return host === srcHost
+  }
+  catch {
+    return true
+  }
 }
 
 const pageLoader = (url, outputDir = process.cwd()) => {
-  log(`Start loading page: ${url} to ${outputDir}`)
+  let htmlFilename
+  let htmlFilepath
+  let resourceDirName
+  let resourceDirPath
 
-  const htmlFilename = formatName(url, '.html')
-  const htmlFilepath = path.join(outputDir, htmlFilename)
-  const resourceDirName = formatName(url, '_files')
-  const resourceDirPath = path.join(outputDir, resourceDirName)
+  try {
+    log(`Start loading page: ${url} to ${outputDir}`)
+
+    htmlFilename = formatName(url, '.html')
+    htmlFilepath = path.join(outputDir, htmlFilename)
+    resourceDirName = formatName(url, '_files')
+    resourceDirPath = path.join(outputDir, resourceDirName)
+  }
+  catch (e) {
+    return Promise.reject(e)
+  }
 
   log(`Generated html filename: ${htmlFilename}`)
   log(`Generated resource directory name: ${resourceDirName}`)
 
-  const loadHtml = ({ data }) => {
-    log('Html loaded')
-
-    return load(data)
-  }
-
-  const loadResource = ($, tagName) => (i, el) => {
-    const attr = tags[tagName]
-    const src = $(el).attr(attr)
-
-    if (src && isLocal(src, url)) {
-      const resourceUrl = new URL(src, url)
-
-      log(`Found local resource: ${resourceUrl.href}`)
-
-      const extension = path.extname(resourceUrl.pathname) || '.html'
-      const resourceFilename = formatName(resourceUrl.href, extension)
-      const resourceFilepath = path.join(resourceDirPath, resourceFilename)
-      const newSrc = path.posix.join(resourceDirName, resourceFilename)
-
-      log(`Generated resource filename: ${resourceFilename}`)
-
-      const promise = axios
-        .get(resourceUrl.href, { responseType: 'arraybuffer' })
-        .then((response) => {
-          log(`Saving resource ${resourceUrl.href} to ${resourceFilepath}`)
-
-          return fs.writeFile(resourceFilepath, response.data)
-        })
-
-      $(el).attr(attr, newSrc)
-
-      return promise
-    }
-
-    return Promise.resolve()
-  }
-
-  const loadResources = ($) => {
-    log('Start loading resources')
-
-    const promises = Object
-      .keys(tags)
-      .flatMap(
-        tagName => $(tagName)
-          .map(loadResource($, tagName))
-          .get(),
-      )
-
-    if (promises.length === 0) {
-      log('No resources to load')
-
-      return Promise.resolve($)
-    }
-
-    return fs
-      .mkdir(resourceDirPath, { recursive: true })
-      .then(() => Promise.all(promises))
-      .then(() => {
-        log('All resources loaded')
-
-        return Promise.resolve($)
-      })
-  }
-
-  const writeHtml = ($) => {
-    log(`Saving html to ${htmlFilepath}`)
-
-    return fs.writeFile(htmlFilepath, $.html())
-  }
+  let $
 
   return axios
     .get(url)
-    .then(loadHtml)
-    .then(loadResources)
-    .then(writeHtml)
+    .catch((e) => {
+      throw new Error(`Failed to download page ${url}: ${e.message}`)
+    })
+    .then((response) => {
+      log('Html loaded')
+
+      $ = load(response.data)
+
+      const resources = []
+
+      Object
+        .keys(tags)
+        .forEach(
+          (tagName) => {
+            const attr = tags[tagName]
+
+            $(tagName)
+              .each((i, el) => {
+                const src = $(el).attr(attr)
+
+                if (src && isLocal(src, url)) {
+                  const resourceUrl = new URL(src, url)
+
+                  log(`Found local resource: ${resourceUrl.href}`)
+
+                  const extension = path.extname(resourceUrl.pathname) || '.html'
+                  const resourceFilename = formatName(resourceUrl.href, extension)
+
+                  resources.push({
+                    el,
+                    attr,
+                    url: resourceUrl.href,
+                    filepath: path.join(resourceDirPath, resourceFilename),
+                    newSrc: path.posix.join(resourceDirName, resourceFilename),
+                  })
+                }
+              })
+          })
+
+      if (resources.length === 0) {
+        log('No resources to load')
+
+        return Promise.resolve()
+      }
+
+      log('Start loading resources')
+
+      return fs
+        .mkdir(resourceDirPath, { recursive: true })
+        .catch((e) => {
+          throw new Error(`Failed to create resource directory ${resourceDirPath}: ${e.message}`)
+        })
+        .then(() => {
+          resources
+            .forEach((res) => {
+              $(res.el).attr(res.attr, res.newSrc)
+            })
+
+          const promises = resources.map(res =>
+            axios
+              .get(res.url, { responseType: 'arraybuffer' })
+              .then((resData) => {
+                log(`Saving resource ${res.url} to ${res.filepath}`)
+
+                return fs.writeFile(res.filepath, resData.data)
+              })
+              .catch((e) => {
+                throw new Error(`Failed to download resource ${res.url}: ${e.message}`)
+              }),
+          )
+
+          return Promise.all(promises)
+        })
+    })
+    .then(() => {
+      log('All resources loaded')
+
+      log(`Saving html to ${htmlFilepath}`)
+
+      return fs
+        .writeFile(htmlFilepath, $.html())
+        .catch((e) => {
+          throw new Error(`Failed to save page to ${htmlFilepath}: ${e.message}`)
+        })
+    })
     .then(() => {
       log(`Page loaded successfully to ${htmlFilepath}`)
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
 import pageLoader from '../src/index.js'
+import debug from 'debug'
+
+const log = debug('page-loader:bin')
 
 const program = new Command()
 
@@ -16,7 +19,10 @@ program
         console.log(filepath)
       })
       .catch((error) => {
+        log(error)
+
         console.error(error.message)
+
         process.exit(1)
       })
   })
