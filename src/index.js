@@ -38,7 +38,7 @@ const formatName = (urlString, extension = '') => {
   return `${basename}${extension}`
 }
 
-const isLocal = (src, url) => {
+const isHostEqual = (src, url) => {
   try {
     const { host } = new URL(url)
     const { host: srcHost } = new URL(src, url)
@@ -63,7 +63,7 @@ const collectResources = ({ $, resourceDirPath, resourceDirName, url }) => {
           .each((i, el) => {
             const src = $(el).attr(attr)
 
-            if (src && isLocal(src, url)) {
+            if (src && isHostEqual(src, url)) {
               const resourceUrl = new URL(src, url)
 
               log(`Found local resource: ${resourceUrl.href}`)
